@@ -1,23 +1,29 @@
 package org.example.userauthservice_may2026.services;
 
 import com.mysql.cj.exceptions.PasswordExpiredException;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtParser;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.MacAlgorithm;
 import lombok.Setter;
+import org.antlr.v4.runtime.misc.Pair;
 import org.example.userauthservice_may2026.exceptions.PasswordMismatchException;
 import org.example.userauthservice_may2026.exceptions.UserAlreadyException;
 import org.example.userauthservice_may2026.exceptions.UserNotSignedUpException;
 import org.example.userauthservice_may2026.models.Role;
 import org.example.userauthservice_may2026.models.State;
 import org.example.userauthservice_may2026.models.User;
+import org.example.userauthservice_may2026.models.UserSession;
 import org.example.userauthservice_may2026.repos.RoleRepo;
 import org.example.userauthservice_may2026.repos.UserRepo;
+import org.example.userauthservice_may2026.repos.UserSessionrepol;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import javax.crypto.SecretKey;
 import java.net.UnknownServiceException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @Service
 public class AuthService implements IAuthService{
@@ -26,6 +32,12 @@ public class AuthService implements IAuthService{
     private UserRepo userRepo;
     @Autowired
     private RoleRepo roleRepo;
+
+    @Autowired
+    private SecretKey secretKey;
+
+    @Autowired
+    private UserSessionrepol userSessionrepol;
 
 
     @Autowired
@@ -60,7 +72,8 @@ public class AuthService implements IAuthService{
     }
 
     @Override
-    public User login(String email, String password) {
+    public Pair<User,String> login(String email, String password) {
+
         Optional<User> optUser=userRepo.findByEmail(email);
         if(optUser.isEmpty() ||optUser.get().getState().equals(State.DELETED)){
             throw new UserNotSignedUpException("user did not signup please signup first!");
@@ -69,7 +82,55 @@ public class AuthService implements IAuthService{
         if(! bCryptPasswordEncoder.matches(password,user.getPassword())){
             throw new PasswordMismatchException("password mismatch exception");
         }
-        return user;
+
         //TOKEN GENERATION ON WED
+
+        HashMap<String, Object> claims=new HashMap<>();
+        claims.put("user_id",user.getId());
+        List<String> permissions = new ArrayList<>();
+        for(Role role: user.getRoles()){
+            permissions.add(role.getValue());
+
+        }
+        claims.put("access",permissions);
+        Long currentTime=System.currentTimeMillis();
+        claims.put("iat",currentTime);
+        claims.put("exp",currentTime+100000);
+
+        MacAlgorithm alogrithm= Jwts.SIG.HS256;
+
+        SecretKey secretKey=alogrithm.key().build();
+
+        String Token=Jwts.builder().claims(claims).signWith(secretKey).compact();
+
+        UserSession userSession= new UserSession();
+        userSession.setToken(Token);
+        userSession.setUser(user);
+        userSession.setState(State.ACTIVE);
+        userSessionrepol.save(userSession);
+        return new Pair<>(user,Token);
+
+    }
+    public Boolean validateToken(String token){
+        //generated Token by me
+        Optional<UserSession> oUserSession=userSessionrepol.findByToken(token);
+        if(oUserSession.isEmpty()){
+            return false;
+        }
+        UserSession userSession=oUserSession.get();
+        User user=userSession.getUser();
+        JwtParser jwtParser= Jwts.parser().verifyWith(secretKey).build();
+        Claims claims=jwtParser.parseSignedClaims(token).getPayload();
+        Long expTime=(Long)claims.get("exp");
+        Long curtime=System.currentTimeMillis();
+        if(curtime>expTime){
+            System.out.println("Token is expired");
+//            userSession.setState(State.DELETED);
+//            userSessionrepol.save(userSession);
+            userSessionrepol.deleteById(userSession.getId());
+        return false;
+        }
+        //expired Token or not
+        return true;
     }
 }
