@@ -11,6 +11,7 @@ import org.example.userauthservice_may2026.models.User;
 import org.example.userauthservice_may2026.repos.RoleRepo;
 import org.example.userauthservice_may2026.repos.UserRepo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.net.UnknownServiceException;
@@ -25,6 +26,10 @@ public class AuthService implements IAuthService{
     private UserRepo userRepo;
     @Autowired
     private RoleRepo roleRepo;
+
+
+    @Autowired
+    private BCryptPasswordEncoder bCryptPasswordEncoder;
     @Override
     public User signUp(String name, String email, String password) {
          Optional<User> optUser=userRepo.findByEmail(email);
@@ -33,7 +38,7 @@ public class AuthService implements IAuthService{
          }
          User user=new User();
          user.setEmail(email);
-         user.setPassword(password);//HASH THIS PASSWORD
+         user.setPassword(bCryptPasswordEncoder.encode(password));//HASH THIS PASSWORD
          user.setName(name);
         Role role=null;
          Optional<Role> optrole=roleRepo.findByValue("NON_ADMIN");
@@ -61,7 +66,7 @@ public class AuthService implements IAuthService{
             throw new UserNotSignedUpException("user did not signup please signup first!");
         }
         User user=optUser.get();
-        if(!user.getPassword().equals(password)){
+        if(! bCryptPasswordEncoder.matches(password,user.getPassword())){
             throw new PasswordMismatchException("password mismatch exception");
         }
         return user;
